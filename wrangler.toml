@@ -2,3 +2,7 @@ compatibility_date = "2023-08-01"
 main = "src/worker.js"
 name = "cf-worker-upload"
 node_compat = true
+
+[[kv_namespaces]]
+binding = "my_uploader"
+id = "f2548ecd3083432393ec45d215e6f030"
