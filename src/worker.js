@@ -8,7 +8,8 @@ export default {
 };
 
 async function handleRequest(request) {
-	var path = new URL(request.url).pathname;
+	const path = new URL(request.url).pathname;
+	const searchParams = new URL(request.url).searchParams;
 	if (request.method === 'GET') {
 		if (path === '/') {
 			return new Response(html, {
@@ -23,11 +24,17 @@ async function handleRequest(request) {
 				},
 			});
 		} else if (path.includes('temp-file')) {
-			return new Response('temp-file', {
-				status: 200,
-				statusText: 'temp-file',
-				request
-			});
+			// 获取特定的查询参数
+			const hashValue = searchParams.get('hash');
+			return new Response(
+				JSON.stringify({
+					status: 200,
+					searchParams: searchParams,
+					query: request.query,
+					body: request.body,
+					hashValue,
+				})
+			);
 		} else {
 			return new Response('Not found', {
 				status: 404,

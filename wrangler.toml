@@ -6,3 +6,9 @@ node_compat = true
 [[kv_namespaces]]
 binding = "my_uploader"
 id = "f2548ecd3083432393ec45d215e6f030"
+
+
+# wrangler.toml (wrangler v3.79.0^)
+[observability]
+enabled = true
+head_sampling_rate = 1
