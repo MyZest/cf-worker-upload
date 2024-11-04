@@ -11,6 +11,7 @@ async function handleRequest(request, env) {
 	const path = new URL(request.url).pathname;
 	const searchParams = new URL(request.url).searchParams;
 	if (request.method === 'GET') {
+		const extraResult = await documentationOrClear({ env });
 		if (path === '/') {
 			return new Response(html, {
 				headers: {
@@ -24,8 +25,6 @@ async function handleRequest(request, env) {
 				},
 			});
 		} else if (path.includes('temp')) {
-			// 获取特定的查询参数
-			const list = await env['my_uploader'].get(`file_hash_list`);
 			const hash = searchParams.get('hash');
 			let info = {};
 			let result = {};
@@ -51,11 +50,10 @@ async function handleRequest(request, env) {
 					hash,
 					info,
 					result,
-					list,
+					extraResult,
 				})
 			);
 		} else if (path.includes('download')) {
-			// 获取特定的查询参数
 			try {
 				const hash = searchParams.get('hash');
 				let filename = '';
@@ -84,6 +82,7 @@ async function handleRequest(request, env) {
 								code: 404,
 								hash,
 								msg: '404',
+								extraResult,
 							})
 						);
 					}
@@ -103,6 +102,7 @@ async function handleRequest(request, env) {
 						error,
 						msg: error.msg,
 						stack: error.stack,
+						extraResult,
 					})
 				);
 			}
@@ -110,6 +110,7 @@ async function handleRequest(request, env) {
 			return new Response('Not found', {
 				status: 404,
 				statusText: 'Not found',
+				extraResult,
 			});
 		}
 	} else if (request.method === 'POST') {
@@ -145,69 +146,9 @@ async function handleRequest(request, env) {
 				downloadCount: 0,
 			};
 			await env['my_uploader'].put(hash, JSON.stringify(info));
+			const result = await documentationOrClear({ hash, env });
 
-
-			let list = (await env['my_uploader'].get(`file_hash_list`)) || [];
-			try {
-				list = JSON.parse(list) || [];
-			} catch (error) {
-				list = [];
-			}
-
-			let results = [];
-			let newList = [hash];
-
-			try {
-				results = await Promise.all(
-					list.map(async (curHash) => {
-						let curInfo = await env['my_uploader'].get(curHash);
-						try {
-							curInfo = JSON.parse(curInfo);
-						} catch (error) {
-							curInfo = {};
-						}
-						if(curInfo?.saveAt){
-							const { downloadCount, saveAt } = curInfo;
-							const rules = [downloadCount >= 3, Date.now() - saveAt >= 10 * 1000 * 60];
-							if (rules.some(Boolean)) {
-								await env['my_uploader'].delete(curHash);
-								await env['my_uploader'].delete(`${curHash}_file`);
-							} else {
-								newList.push(curHash);
-							}
-							return {
-								rules,
-								curHash,
-							};
-						}else{
-							return {
-								curInfo,
-								curHash
-							};
-						}
-					
-					})
-				);
-				await env['my_uploader'].delete('file_hash_list');
-				await env['my_uploader'].put(`file_hash_list`, JSON.stringify(newList));
-			} catch (error) {
-				results = {
-					code: 503,
-					error,
-					msg: error.msg,
-					stack: error.stack,
-				};
-			}
-
-			return new Response(
-				JSON.stringify(
-					Object.assign({}, info, {
-						list,
-						results,
-						newList
-					})
-				)
-			);
+			return new Response(JSON.stringify(Object.assign({}, info, result)));
 		} else {
 			return new Response('Not found', {
 				status: 404,
@@ -237,4 +178,67 @@ function base64Decode(string) {
 		bufView[i] = string.charCodeAt(i);
 	}
 	return buf;
+}
+
+async function documentationOrClear({ hash, env } = {}) {
+	let oldList = (await env['my_uploader'].get(`file_hash_list`)) || [];
+	try {
+		oldList = JSON.parse(oldList) || [];
+	} catch (error) {
+		oldList = [];
+	}
+
+	let results = [];
+	let newList = [];
+	if (hash) {
+		newList.push(hash);
+	}
+
+	try {
+		results = await Promise.all(
+			oldList.map(async (curHash) => {
+				let curInfo = await env['my_uploader'].get(curHash);
+				try {
+					curInfo = JSON.parse(curInfo);
+				} catch (error) {
+					curInfo = {};
+				}
+				if (curInfo?.saveAt) {
+					const { downloadCount, saveAt } = curInfo;
+					const rules = [downloadCount >= 3, Date.now() - saveAt >= 10 * 1000 * 60];
+					if (rules.some(Boolean)) {
+						await env['my_uploader'].delete(curHash);
+						await env['my_uploader'].delete(`${curHash}_file`);
+					} else {
+						newList.push(curHash);
+					}
+					return {
+						rules,
+						curHash,
+					};
+				} else {
+					return {
+						curInfo,
+						curHash,
+					};
+				}
+			})
+		);
+		await env['my_uploader'].delete('file_hash_list');
+		await env['my_uploader'].put(`file_hash_list`, JSON.stringify(newList));
+	} catch (error) {
+		results = {
+			code: 503,
+			error,
+			msg: error.msg,
+			stack: error.stack,
+		};
+	}
+
+	return {
+		results,
+		newList,
+		oldList,
+		hash,
+	};
 }
