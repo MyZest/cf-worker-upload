@@ -135,50 +135,7 @@ async function handleRequest(request, env) {
 			const data = await file.arrayBuffer();
 			const hash = await sha1(data);
 			await env['my_uploader'].put(`${hash}_file`, data);
-			let list = await (async () => {
-				let res = (await env['my_uploader'].get(`file_hash_list`)) || [];
-				try {
-					res = JSON.parse(res) || [];
-				} catch (error) {
-					res = [];
-				}
-				return res;
-			})();
-			results = [];
-			try {
-				let newList = [hash];
 
-				results = await Promise.all(
-					list.map(async (curHash) => {
-						let curInfo = await env['my_uploader'].get(curHash);
-						try {
-							curInfo = JSON.parse(curInfo);
-						} catch (error) {
-							curInfo = {};
-						}
-						const { downloadCount, saveAt } = curInfo;
-						const rules = [downloadCount >= 3, Date.now() - saveAt >= 10 * 1000 * 60];
-						if (rules.some(Boolean)) {
-							await env['my_uploader'].delete(curHash);
-							await env['my_uploader'].delete(`${curHash}_file`);
-						} else {
-							newList.push(curHash);
-						}
-						return {
-							rules,
-							curHash,
-						};
-					})
-				);
-				await env['my_uploader'].put(`file_hash_list`, JSON.stringify(newList));
-			} catch (error) {
-				results = {
-					code: 503,
-					error,
-					msg: error.msg,
-					stack: error.stack,
-				};
-			}
 			const info = {
 				name: file.name,
 				type: file.type,
@@ -189,11 +146,65 @@ async function handleRequest(request, env) {
 			};
 			await env['my_uploader'].put(hash, JSON.stringify(info));
 
+
+			let list = (await env['my_uploader'].get(`file_hash_list`)) || [];
+			try {
+				list = JSON.parse(list) || [];
+			} catch (error) {
+				list = [];
+			}
+
+			let results = [];
+			let newList = [hash];
+
+			try {
+				results = await Promise.all(
+					list.map(async (curHash) => {
+						let curInfo = await env['my_uploader'].get(curHash);
+						try {
+							curInfo = JSON.parse(curInfo);
+						} catch (error) {
+							curInfo = {};
+						}
+						if(curInfo?.saveAt){
+							const { downloadCount, saveAt } = curInfo;
+							const rules = [downloadCount >= 3, Date.now() - saveAt >= 10 * 1000 * 60];
+							if (rules.some(Boolean)) {
+								await env['my_uploader'].delete(curHash);
+								await env['my_uploader'].delete(`${curHash}_file`);
+							} else {
+								newList.push(curHash);
+							}
+							return {
+								rules,
+								curHash,
+							};
+						}else{
+							return {
+								curInfo,
+								curHash
+							};
+						}
+					
+					})
+				);
+				await env['my_uploader'].delete('file_hash_list');
+				await env['my_uploader'].put(`file_hash_list`, JSON.stringify(newList));
+			} catch (error) {
+				results = {
+					code: 503,
+					error,
+					msg: error.msg,
+					stack: error.stack,
+				};
+			}
+
 			return new Response(
 				JSON.stringify(
 					Object.assign({}, info, {
 						list,
 						results,
+						newList
 					})
 				)
 			);
