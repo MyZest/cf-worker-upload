@@ -23,23 +23,51 @@ async function handleRequest(request, env) {
 					'content-type': 'application/javascript;charset=UTF-8',
 				},
 			});
-		} else if (path.includes('temp-file')) {
+		} else if (path.includes('temp')) {
 			// 获取特定的查询参数
+			const list = await env['my_uploader'].get(`file_hash_list`);
 			const hash = searchParams.get('hash');
-			let value = '';
+			let info = {};
+			let result = {};
 			if (hash) {
-				value = await env.BINDING_NAME.get(hash);
+				result = await env['my_uploader'].get(`${hash}_file`, { type: 'arrayBuffer' });
+				info = await env['my_uploader'].get(hash);
 			}
 
 			return new Response(
 				JSON.stringify({
 					code: 0,
-					searchParams,
 					hash,
-					value,
-					env,
+					info,
+					result,
+					list
 				})
 			);
+		} else if (path.includes('download')) {
+			// 获取特定的查询参数
+			const hash = searchParams.get('hash');
+			let filename = '';
+			let value = {};
+			if (hash) {
+				value = await env['my_uploader'].get(`${hash}_file`, { type: 'arrayBuffer' });
+				const info = await env['my_uploader'].get(hash);
+				filename = info.filename;
+				await env['my_uploader'].delete(hash);
+				await env['my_uploader'].put(
+					hash,
+					Object.assign({}, info, {
+						downloadCount: info?.downloadCount + 1,
+					})
+				);
+			}
+
+			return new Response(value, {
+				status: 200,
+				headers: {
+					'Content-Type': 'application/octet-stream',
+					'Content-Disposition': `attachment; filename="${filename}"`,
+				},
+			});
 		} else {
 			return new Response('Not found', {
 				status: 404,
@@ -68,8 +96,16 @@ async function handleRequest(request, env) {
 			const file = formData.get('file');
 			const data = await file.arrayBuffer();
 			const hash = await sha1(data);
-			const result = await env.BINDING_NAME.put(hash, file);
-			// const value = await env.BINDING_NAME.get("KEY");
+			const fileName = file?.name; // 保持原文件名
+			await env['my_uploader'].put(`${hash}_file`, data);
+			const list = await env['my_uploader'].get(`file_hash_list`) || [];
+			await env['my_uploader'].put(`file_hash_list`, [hash,...(list || [])]);
+			await env['my_uploader'].put(hash, {
+				fileName,
+				saveAt: Date.now(),
+				hash,
+				downloadCount: 0,
+			});
 
 			return new Response(
 				JSON.stringify({
@@ -77,7 +113,8 @@ async function handleRequest(request, env) {
 					type: file.type,
 					size: file.size,
 					hash,
-					result,
+					fileName,
+					data,
 				})
 			);
 		} else {
