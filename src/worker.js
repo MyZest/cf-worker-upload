@@ -3,11 +3,11 @@ const script = `function _(e){return document.getElementById(e)}function niceByt
 
 export default {
 	async fetch(request, env, ctx) {
-		return handleRequest(request);
+		return handleRequest(request, env, ctx);
 	},
 };
 
-async function handleRequest(request) {
+async function handleRequest(request, env) {
 	const path = new URL(request.url).pathname;
 	const searchParams = new URL(request.url).searchParams;
 	if (request.method === 'GET') {
@@ -25,14 +25,19 @@ async function handleRequest(request) {
 			});
 		} else if (path.includes('temp-file')) {
 			// 获取特定的查询参数
-			const hashValue = searchParams.get('hash');
+			const hash = searchParams.get('hash');
+			let value = '';
+			if (hash) {
+				value = await env.BINDING_NAME.get(hash);
+			}
+
 			return new Response(
 				JSON.stringify({
-					status: 200,
-					searchParams: searchParams,
-					query: request.query,
-					body: request.body,
-					hashValue,
+					code: 0,
+					searchParams,
+					hash,
+					value,
+					env,
 				})
 			);
 		} else {
