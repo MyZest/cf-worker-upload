@@ -32,6 +32,9 @@ async function handleRequest(request, env) {
 			if (hash) {
 				result = await env['my_uploader'].get(`${hash}_file`, { type: 'arrayBuffer' });
 				info = await env['my_uploader'].get(hash);
+				try {
+					info = JSON.parse(info);
+				} catch (error) {}
 			}
 
 			return new Response(
@@ -40,7 +43,7 @@ async function handleRequest(request, env) {
 					hash,
 					info,
 					result,
-					list
+					list,
 				})
 			);
 		} else if (path.includes('download')) {
@@ -50,14 +53,19 @@ async function handleRequest(request, env) {
 			let value = {};
 			if (hash) {
 				value = await env['my_uploader'].get(`${hash}_file`, { type: 'arrayBuffer' });
-				const info = await env['my_uploader'].get(hash);
-				filename = info.filename;
+				let info = await env['my_uploader'].get(hash);
+				try {
+					info = JSON.parse(info);
+				} catch (error) {}
+				filename = info.name;
 				await env['my_uploader'].delete(hash);
 				await env['my_uploader'].put(
 					hash,
-					Object.assign({}, info, {
-						downloadCount: info?.downloadCount + 1,
-					})
+					JSON.stringify(
+						Object.assign({}, info, {
+							downloadCount: info?.downloadCount + 1,
+						})
+					)
 				);
 			}
 
@@ -96,26 +104,59 @@ async function handleRequest(request, env) {
 			const file = formData.get('file');
 			const data = await file.arrayBuffer();
 			const hash = await sha1(data);
-			const fileName = file?.name; // 保持原文件名
 			await env['my_uploader'].put(`${hash}_file`, data);
-			const list = await env['my_uploader'].get(`file_hash_list`) || [];
-			await env['my_uploader'].put(`file_hash_list`, [hash,...(list || [])]);
-			await env['my_uploader'].put(hash, {
-				fileName,
+			let list = await (async () => {
+				let res = (await env['my_uploader'].get(`file_hash_list`)) || [];
+				try {
+					res = JSON.parse(res) || [];
+				} catch (error) {
+					res = [];
+				}
+				return res;
+			})();
+
+			let newList = [hash];
+
+			const results = await Promise.all(
+				list.map(async (curHash) => {
+					let curInfo = await env['my_uploader'].get(curHash);
+					try {
+						curInfo = JSON.parse(curInfo);
+					} catch (error) {
+						curInfo = {};
+					}
+					const { downloadCount, saveAt } = curInfo;
+					const rules = [downloadCount >= 3, Date.now() - saveAt >= 10 * 1000 * 60];
+					if (rules.some(Boolean)) {
+						await env['my_uploader'].delete(curHash);
+						await env['my_uploader'].delete(`${curHash}_file`);
+					} else {
+						newList.push(curHash);
+					}
+					return {
+						rules,
+						curHash,
+					};
+				})
+			);
+			await env['my_uploader'].put(`file_hash_list`, JSON.stringify(newList));
+			const info = {
+				name: file.name,
+				type: file.type,
+				size: file.size,
 				saveAt: Date.now(),
 				hash,
 				downloadCount: 0,
-			});
+			};
+			await env['my_uploader'].put(hash, JSON.stringify(info));
 
 			return new Response(
-				JSON.stringify({
-					name: file.name,
-					type: file.type,
-					size: file.size,
-					hash,
-					fileName,
-					data,
-				})
+				JSON.stringify(
+					Object.assign({}, info, {
+						list,
+						results,
+					})
+				)
 			);
 		} else {
 			return new Response('Not found', {
