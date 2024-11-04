@@ -35,6 +35,14 @@ async function handleRequest(request, env) {
 				try {
 					info = JSON.parse(info);
 				} catch (error) {}
+			} else {
+				return new Response(
+					JSON.stringify({
+						code: 404,
+						hash,
+						msg: '404',
+					})
+				);
 			}
 
 			return new Response(
@@ -48,34 +56,56 @@ async function handleRequest(request, env) {
 			);
 		} else if (path.includes('download')) {
 			// 获取特定的查询参数
-			const hash = searchParams.get('hash');
-			let filename = '';
-			let value = {};
-			if (hash) {
-				value = await env['my_uploader'].get(`${hash}_file`, { type: 'arrayBuffer' });
-				let info = await env['my_uploader'].get(hash);
-				try {
-					info = JSON.parse(info);
-				} catch (error) {}
-				filename = info.name;
-				await env['my_uploader'].delete(hash);
-				await env['my_uploader'].put(
-					hash,
-					JSON.stringify(
-						Object.assign({}, info, {
-							downloadCount: info?.downloadCount + 1,
-						})
-					)
+			try {
+				const hash = searchParams.get('hash');
+				let filename = '';
+				let value = {};
+				let info = {};
+				if (hash) {
+					value = await env['my_uploader'].get(`${hash}_file`, { type: 'arrayBuffer' });
+					info = await env['my_uploader'].get(hash);
+					try {
+						info = JSON.parse(info);
+					} catch (error) {}
+					if (info?.name) {
+						filename = info?.name;
+						await env['my_uploader'].delete(hash);
+						await env['my_uploader'].put(
+							hash,
+							JSON.stringify(
+								Object.assign({}, info, {
+									downloadCount: info?.downloadCount + 1,
+								})
+							)
+						);
+					} else {
+						return new Response(
+							JSON.stringify({
+								code: 404,
+								hash,
+								msg: '404',
+							})
+						);
+					}
+				}
+
+				return new Response(value, {
+					status: 200,
+					headers: {
+						'Content-Type': 'application/octet-stream',
+						'Content-Disposition': `attachment; filename="${filename}"`,
+					},
+				});
+			} catch (error) {
+				return new Response(
+					JSON.stringify({
+						code: 503,
+						error,
+						msg: error.msg,
+						stack: error.stack,
+					})
 				);
 			}
-
-			return new Response(value, {
-				status: 200,
-				headers: {
-					'Content-Type': 'application/octet-stream',
-					'Content-Disposition': `attachment; filename="${filename}"`,
-				},
-			});
 		} else {
 			return new Response('Not found', {
 				status: 404,
@@ -114,32 +144,41 @@ async function handleRequest(request, env) {
 				}
 				return res;
 			})();
+			results = [];
+			try {
+				let newList = [hash];
 
-			let newList = [hash];
-
-			const results = await Promise.all(
-				list.map(async (curHash) => {
-					let curInfo = await env['my_uploader'].get(curHash);
-					try {
-						curInfo = JSON.parse(curInfo);
-					} catch (error) {
-						curInfo = {};
-					}
-					const { downloadCount, saveAt } = curInfo;
-					const rules = [downloadCount >= 3, Date.now() - saveAt >= 10 * 1000 * 60];
-					if (rules.some(Boolean)) {
-						await env['my_uploader'].delete(curHash);
-						await env['my_uploader'].delete(`${curHash}_file`);
-					} else {
-						newList.push(curHash);
-					}
-					return {
-						rules,
-						curHash,
-					};
-				})
-			);
-			await env['my_uploader'].put(`file_hash_list`, JSON.stringify(newList));
+				results = await Promise.all(
+					list.map(async (curHash) => {
+						let curInfo = await env['my_uploader'].get(curHash);
+						try {
+							curInfo = JSON.parse(curInfo);
+						} catch (error) {
+							curInfo = {};
+						}
+						const { downloadCount, saveAt } = curInfo;
+						const rules = [downloadCount >= 3, Date.now() - saveAt >= 10 * 1000 * 60];
+						if (rules.some(Boolean)) {
+							await env['my_uploader'].delete(curHash);
+							await env['my_uploader'].delete(`${curHash}_file`);
+						} else {
+							newList.push(curHash);
+						}
+						return {
+							rules,
+							curHash,
+						};
+					})
+				);
+				await env['my_uploader'].put(`file_hash_list`, JSON.stringify(newList));
+			} catch (error) {
+				results = {
+					code: 503,
+					error,
+					msg: error.msg,
+					stack: error.stack,
+				};
+			}
 			const info = {
 				name: file.name,
 				type: file.type,
