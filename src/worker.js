@@ -138,9 +138,9 @@ async function handleRequest(request, env) {
 			await env['my_uploader'].put(`${hash}_file`, data);
 
 			const info = {
-				name: file.name,
-				type: file.type,
-				size: file.size,
+				name: file?.name,
+				type: file?.type,
+				size: file?.size,
 				saveAt: Date.now(),
 				hash,
 				downloadCount: 0,
