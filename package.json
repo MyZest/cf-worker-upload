@@ -3,7 +3,8 @@
 	"version": "0.0.0",
 	"private": true,
 	"scripts": {
-		"deploy": "wrangler login & wrangler deploy",
+		"deploy": "wrangler deploy",
+		"login": "wrangler login",
 		"start": "wrangler dev"
 	},
 	"devDependencies": {
