@@ -247,6 +247,5 @@ async function documentationOrClear({ env } = {}) {
 
 	return {
 		allKeys,
-		results,
 	};
 }
