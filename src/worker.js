@@ -180,52 +180,64 @@ function base64Decode(string) {
 	return buf;
 }
 
-async function documentationOrClear({ hash, env } = {}) {
-	let oldList = (await env['my_uploader'].get(`file_hash_list`)) || [];
-	try {
-		oldList = JSON.parse(oldList) || [];
-	} catch (error) {
-		oldList = [];
-	}
-
+async function documentationOrClear({ env } = {}) {
+	let cursor = undefined;
+	let allKeys = [];
 	let results = [];
-	let newList = [];
-	if (hash) {
-		newList.push(hash);
-	}
+	// 使用分页方式列出所有键
+	do {
+		const listResult = await env['my_uploader'].list({
+			cursor: cursor, // 分页
+			limit: 1000, // 每次列出最大1000个键
+		});
+
+		// 将当前批次的键添加到结果中
+		allKeys = allKeys.concat(listResult.keys);
+
+		cursor = listResult.cursor; // 获取下一页的游标
+	} while (cursor); // 继续分页直到没有更多数据
+
+	allKeys = allKeys.reduce((all, item) => {
+		const hash = item?.name;
+		all.push(hash);
+		return all;
+	}, []);
 
 	try {
 		results = await Promise.all(
-			oldList.map(async (curHash) => {
+			allKeys.map(async (curHash) => {
 				let curInfo = await env['my_uploader'].get(curHash);
-				try {
-					curInfo = JSON.parse(curInfo);
-				} catch (error) {
-					curInfo = {};
-				}
-				if (curInfo?.saveAt) {
-					const { downloadCount, saveAt } = curInfo;
-					const rules = [downloadCount >= 3, Date.now() - saveAt >= 10 * 1000 * 60];
-					if (rules.some(Boolean)) {
-						await env['my_uploader'].delete(curHash);
-						await env['my_uploader'].delete(`${curHash}_file`);
-					} else {
-						newList.push(curHash);
+				if (curHash?.indexOf('file') !== -1) {
+					const isExist = allKeys.find((key) => key === curHash.replace('_file', ''));
+					if (!isExist) {
+						await Promise.allSettled([env['my_uploader'].delete(`${curHash}`)]);
 					}
-					return {
-						rules,
-						curHash,
-					};
 				} else {
-					return {
-						curInfo,
-						curHash,
-					};
+					try {
+						curInfo = JSON.parse(curInfo);
+					} catch (error) {
+						curInfo = {};
+					}
+					if (curInfo?.saveAt) {
+						const { downloadCount, saveAt } = curInfo;
+						const rules = [downloadCount >= 3, Date.now() - saveAt >= 10 * 1000 * 60];
+						if (rules.some(Boolean)) {
+							await Promise.allSettled([env['my_uploader'].delete(`${curHash}_file`), env['my_uploader'].delete(curHash)]);
+						} else {
+							newList.push(curHash);
+						}
+						return {
+							rules,
+							curHash,
+						};
+					} 
 				}
+				return {
+					curInfo,
+					curHash,
+				};
 			})
 		);
-		await env['my_uploader'].delete('file_hash_list');
-		await env['my_uploader'].put(`file_hash_list`, JSON.stringify(newList));
 	} catch (error) {
 		results = {
 			code: 503,
@@ -236,9 +248,7 @@ async function documentationOrClear({ hash, env } = {}) {
 	}
 
 	return {
+		allKeys,
 		results,
-		newList,
-		oldList,
-		hash,
 	};
 }
