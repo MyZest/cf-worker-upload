@@ -223,9 +223,7 @@ async function documentationOrClear({ env } = {}) {
 						const rules = [downloadCount >= 3, Date.now() - saveAt >= 10 * 1000 * 60];
 						if (rules.some(Boolean)) {
 							await Promise.allSettled([env['my_uploader'].delete(`${curHash}_file`), env['my_uploader'].delete(curHash)]);
-						} else {
-							newList.push(curHash);
-						}
+						} 
 						return {
 							rules,
 							curHash,
